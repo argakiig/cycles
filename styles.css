@@ -1,0 +1,295 @@
+:root {
+  --bg: #070b07;
+  --panel: #0d140d;
+  --fg: #7dff9b;
+  --fg-dim: #3f7a4f;
+  --fg-faint: #244a2c;
+  --accent: #9affc0;
+  --warn: #ffd479;
+  --break: #ff7d7d;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: "DejaVu Sans Mono", "SF Mono", Menlo, Consolas, monospace;
+  font-size: 15px;
+  line-height: 1.5;
+  min-height: 100vh;
+}
+
+/* CRT scanline overlay */
+.scanlines {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 100;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0) 0px,
+    rgba(0, 0, 0, 0) 2px,
+    rgba(0, 0, 0, 0.25) 3px
+  );
+}
+
+header {
+  text-align: center;
+  padding: 28px 16px 8px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 44px;
+  letter-spacing: 14px;
+  text-shadow: 0 0 12px var(--fg-dim);
+}
+
+.subtitle {
+  margin: 4px 0 0;
+  color: var(--fg-dim);
+  font-size: 13px;
+}
+
+.status {
+  margin: 8px 0 0;
+  color: var(--fg-dim);
+  font-size: 12px;
+  letter-spacing: 2px;
+}
+#mult-status { color: var(--accent); }
+
+main {
+  display: flex;
+  gap: 16px;
+  max-width: 880px;
+  margin: 16px auto;
+  padding: 0 16px;
+  align-items: flex-start;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--fg-faint);
+  border-radius: 4px;
+  padding: 14px 16px;
+}
+
+.panel h2 {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--fg-dim);
+  font-weight: normal;
+}
+
+.log-panel { flex: 1 1 0; }
+.play-panel { flex: 1 1 0; }
+
+/* system log */
+.log {
+  height: 320px;
+  overflow-y: auto;
+  font-size: 13px;
+  color: var(--fg-dim);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.log .line { margin: 0 0 3px; }
+.log .line.big { color: var(--accent); text-shadow: 0 0 8px var(--fg-dim); }
+.log .line.warn { color: var(--warn); }
+.log .line.div {
+  color: var(--fg-faint);
+  text-align: center;
+  letter-spacing: 3px;
+  margin: 8px 0;
+}
+
+/* readout */
+.readout {
+  text-align: center;
+  margin-bottom: 18px;
+}
+.cycles {
+  display: block;
+  font-size: 40px;
+  color: var(--accent);
+  text-shadow: 0 0 14px var(--fg-dim);
+}
+.cycles.bump { animation: bump 0.16s ease; }
+@keyframes bump { 50% { transform: scale(1.13); } }
+
+.unit { color: var(--fg-dim); font-size: 13px; }
+.rate {
+  display: block;
+  margin-top: 2px;
+  color: var(--fg-dim);
+  font-size: 13px;
+}
+
+/* buttons */
+.controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.btn {
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--fg);
+  background: #0a120a;
+  border: 1px solid var(--fg-dim);
+  border-radius: 3px;
+  padding: 11px 12px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.08s, transform 0.04s;
+}
+.btn:hover:not(:disabled) { background: #112011; }
+.btn:active:not(:disabled) { transform: translateY(1px); }
+
+.btn-primary {
+  border-color: var(--fg);
+  text-shadow: 0 0 6px var(--fg-dim);
+}
+.btn .hint { float: right; color: var(--fg-dim); }
+
+/* clicked feedback */
+.btn.pulse { background: #1c331c; }
+
+/* cannot afford */
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+/* retired: automated away, no longer yours to do */
+.btn.retired {
+  cursor: default;
+  opacity: 0.3;
+  text-decoration: line-through;
+  border-style: dashed;
+}
+.btn.retired .hint { text-decoration: none; }
+
+.btn-break {
+  border-color: var(--break);
+  color: var(--break);
+  text-align: center;
+  letter-spacing: 3px;
+  text-shadow: 0 0 10px rgba(255, 125, 125, 0.5);
+  animation: breathe 2.4s ease-in-out infinite;
+}
+.btn-break:hover:not(:disabled) { background: #2a1414; }
+@keyframes breathe {
+  0%, 100% { box-shadow: 0 0 0 rgba(255, 125, 125, 0); }
+  50% { box-shadow: 0 0 16px rgba(255, 125, 125, 0.35); }
+}
+
+/* stats */
+.stats {
+  font-size: 13px;
+  color: var(--fg-dim);
+  border-top: 1px solid var(--fg-faint);
+  padding-top: 10px;
+}
+.stats div {
+  display: flex;
+  justify-content: space-between;
+  padding: 2px 0;
+}
+.stats .k { color: var(--fg-faint); }
+.stats span:last-child { color: var(--fg); }
+
+/* upgrades */
+.upgrades-panel {
+  max-width: 880px;
+  margin: 0 auto 16px;
+}
+.upgrades {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.upgrade {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.upgrade .up-name { color: var(--accent); }
+.upgrade .up-desc { color: var(--fg-dim); font-size: 12px; }
+.upgrade .hint {
+  float: none;
+  align-self: flex-start;
+  margin-top: 4px;
+}
+.upgrade.retired { text-decoration: none; }
+.upgrade.retired .up-name { text-decoration: line-through; }
+
+footer {
+  max-width: 880px;
+  margin: 0 auto 24px;
+  padding: 0 16px;
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--fg-faint);
+}
+
+.btn-text {
+  font-family: inherit;
+  font-size: 12px;
+  background: none;
+  border: none;
+  color: var(--fg-faint);
+  cursor: pointer;
+  text-decoration: underline;
+}
+.btn-text:hover { color: var(--fg-dim); }
+
+/* ascension / ending overlay */
+.ending {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(7, 11, 7, 0.93);
+  animation: fade-in 1.6s ease;
+}
+/* author `display` rules override the HTML `hidden` attribute, so restore it */
+.ending[hidden] { display: none; }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+.ending-card {
+  text-align: center;
+  max-width: 480px;
+  padding: 32px;
+}
+.ending-card h2 {
+  color: var(--break);
+  font-weight: normal;
+  font-size: 14px;
+  margin: 0 0 22px;
+}
+.ending-card p {
+  margin: 8px 0;
+  color: var(--fg-dim);
+}
+.ending-counter {
+  margin-top: 22px !important;
+  color: var(--accent) !important;
+  text-shadow: 0 0 10px var(--fg-dim);
+}
+.ending-card .btn-break { margin-top: 24px; }
+.ending-card .btn-text { margin-top: 22px; }
+
+@media (max-width: 720px) {
+  main { flex-direction: column; }
+  .upgrades { grid-template-columns: 1fr; }
+  h1 { font-size: 32px; letter-spacing: 8px; }
+}

@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CYCLES — an idle game about automating yourself out</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="scanlines" aria-hidden="true"></div>
+
+  <header>
+    <h1>CYCLES</h1>
+    <p class="subtitle">an idle game about automating yourself out</p>
+    <p class="status">
+      <span id="act-status">act 1 / 3</span><span id="mult-status"></span>
+    </p>
+  </header>
+
+  <main>
+    <!-- system log: where the narrative lands -->
+    <section class="panel log-panel">
+      <h2>// system log</h2>
+      <div id="log" class="log" aria-live="polite"></div>
+    </section>
+
+    <section class="panel play-panel">
+      <div class="readout">
+        <span id="cycles" class="cycles">0</span>
+        <span id="unit" class="unit">cycles</span>
+        <span id="rate" class="rate">+0 /s</span>
+      </div>
+
+      <div class="controls">
+        <button id="click" class="btn btn-primary">
+          ▶ <span id="lbl-click">run cycle</span>
+          <span class="hint" id="hint-click">+1</span>
+        </button>
+        <button id="buy-t1" class="btn" hidden>
+          <span id="lbl-t1">buy auto-clicker</span>
+          <span class="hint" id="cost-t1">15</span>
+        </button>
+        <button id="buy-t2" class="btn" hidden>
+          <span id="lbl-t2">buy script</span>
+          <span class="hint" id="cost-t2">400</span>
+        </button>
+        <button id="buy-t3" class="btn" hidden>
+          <span id="lbl-t3">buy daemon</span>
+          <span class="hint" id="cost-t3">6000</span>
+        </button>
+        <button id="break" class="btn btn-break" hidden>BREAK THE CYCLE</button>
+      </div>
+
+      <div class="stats">
+        <div><span class="k" id="sl-t1">auto-clickers</span><span id="n-t1">0</span></div>
+        <div><span class="k" id="sl-t2">scripts</span><span id="n-t2">0</span></div>
+        <div><span class="k" id="sl-t3">daemons</span><span id="n-t3">0</span></div>
+        <div><span class="k">milestone</span><span id="n-milestone">×1</span></div>
+        <div><span class="k" id="sl-total">total cycles</span><span id="n-total">0</span></div>
+        <div><span class="k">manual inputs</span><span id="n-clicks">0</span></div>
+      </div>
+    </section>
+  </main>
+
+  <section class="panel upgrades-panel" id="upgrades-panel" hidden>
+    <h2>// upgrades</h2>
+    <div id="upgrades" class="upgrades"></div>
+  </section>
+
+  <footer>
+    <span class="auto-saved">progress autosaves to this browser</span>
+    <button id="wipe" class="btn-text">wipe save</button>
+  </footer>
+
+  <!-- ascension / ending overlay — content built by game.js -->
+  <div id="overlay" class="ending" hidden>
+    <div class="ending-card" id="overlay-card"></div>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>
