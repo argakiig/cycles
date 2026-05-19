@@ -131,6 +131,7 @@ let daemonAccum = 0;
 let selfBuyAccum = 0;
 let breakUnlocked = false;
 let shownMilestone = 0;
+let wiping = false; // set during a save wipe so nothing re-persists on reload
 
 // --- helpers ----------------------------------------------------------------
 const $ = (id) => document.getElementById(id);
@@ -520,6 +521,7 @@ function render() {
 
 // --- save / load ------------------------------------------------------------
 function save() {
+  if (wiping) return; // a wipe is in progress — don't write the state back
   state.lastSeen = Date.now();
   try {
     localStorage.setItem(SAVE_KEY, JSON.stringify(state));
@@ -576,6 +578,7 @@ function load() {
 
 function wipe() {
   if (!window.confirm("Wipe your save and start over from act 1?")) return;
+  wiping = true;
   try {
     localStorage.removeItem(SAVE_KEY);
   } catch (e) {
