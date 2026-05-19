@@ -17,6 +17,10 @@ Each act is a four-tier automation chain — every tier deploys the one below it
 Along the way, per-act **upgrades** and tier-1 **milestone bonuses** deepen the
 climb. A full run through all three acts takes roughly 15–20 minutes.
 
+Finishing all three acts banks **echoes** — a permanent currency spent between
+runs on run-wide bonuses (production, head starts, a steeper ascension curve).
+Each new playthrough bends a little more to your will. You still never escape.
+
 ## Play
 
 Play online at **https://argakiig.xyz/cycles/**, or open `index.html` in any

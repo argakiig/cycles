@@ -111,6 +111,48 @@ const UPGRADES = [
     cost: 60000, unlock: (s) => s.t4 >= 1 },
 ];
 
+// --- meta-prestige ----------------------------------------------------------
+// Echoes are banked when you finish a full three-act run, then spent on
+// permanent, run-wide bonuses. They persist across runs — only a wipe clears
+// them. Each meta level costs base × 2^(current level).
+const META = [
+  { id: "hum", name: "residual hum", blurb: "all production ×1.5 per level",
+    base: 4 },
+  { id: "headstart", name: "head start", blurb: "begin each act with cycles",
+    base: 6 },
+  { id: "prefab", name: "prefab", blurb: "begin each act with auto-clickers",
+    base: 8 },
+  { id: "momentum", name: "momentum", blurb: "ascension multiplier +1 per level",
+    base: 12 },
+];
+const metaLevel = (id) => state.meta[id] || 0;
+const metaCost = (m) => m.base * Math.pow(2, metaLevel(m.id));
+
+// permanent production multiplier from the "residual hum" meta-upgrade
+function metaMult() {
+  return Math.pow(1.5, metaLevel("hum"));
+}
+// cycles granted at the start of each act, scaled to that act's costs
+function metaStartCycles() {
+  const l = metaLevel("headstart");
+  return l > 0 ? Math.floor(100 * Math.pow(8, l - 1) * A().costScale) : 0;
+}
+// free tier-1 buildings granted at the start of each act
+function metaPrefab() {
+  return metaLevel("prefab") * 4;
+}
+// per-ascension global multiplier, raised by the "momentum" meta-upgrade
+function ascendMult() {
+  return ASCEND_MULT + metaLevel("momentum");
+}
+// echoes granted for completing a run, scaled by total currency earned
+function echoesEarned() {
+  return Math.max(
+    3,
+    Math.floor(Math.log10(Math.max(state.runTotal, 1000)) * 2.5)
+  );
+}
+
 // --- state ------------------------------------------------------------------
 function freshState() {
   return {
@@ -126,6 +168,11 @@ function freshState() {
     actBroken: false,  // current act's cycle broken, awaiting ascension
     gameOver: false,   // final act broken — true ending reached
     buyMode: 1,        // buildings bought per click of a buy button: 1, 10, "max"
+    runTotal: 0,       // currency earned across the whole run (feeds echoes)
+    lastEchoes: 0,     // echoes granted by the most recent completed run
+    echoes: 0,         // spendable meta-currency — persists across runs
+    runs: 0,           // completed full runs — persists across runs
+    meta: {},          // meta-upgrade id -> level — persists across runs
     lastSeen: Date.now(),
     log: [],
   };
@@ -176,10 +223,10 @@ function t1EachRate() {
   return A().t1.rate * (hasUp("overclock") ? 3 : 1) * milestoneMult();
 }
 function rate() {
-  return state.t1 * t1EachRate() * state.globalMult;
+  return state.t1 * t1EachRate() * state.globalMult * metaMult();
 }
 function manualGain() {
-  return 1 * (hasUp("muscle") ? 10 : 1) * state.globalMult;
+  return 1 * (hasUp("muscle") ? 10 : 1) * state.globalMult * metaMult();
 }
 // which upgrade speeds up each tier's deploy cadence
 const TIER_SPEEDUP = { 2: "pipeline", 3: "preempt", 4: "autoscale" };
@@ -323,7 +370,12 @@ function breakTheCycle() {
   selfBuyAccum = 0;
   for (const m of A().onBreak) log(m, m === A().onBreak[2] ? "big" : "warn");
   if (state.act >= FINAL_ACT) {
+    state.runTotal += state.totalThisAct;
+    state.lastEchoes = echoesEarned();
+    state.echoes += state.lastEchoes;
+    state.runs += 1;
     state.gameOver = true;
+    log("> you leave " + fmt(state.lastEchoes) + " echoes behind.", "big");
     showFinalEnding();
   } else {
     showAscension();
@@ -333,12 +385,14 @@ function breakTheCycle() {
 
 function ascend() {
   state.act += 1;
-  state.globalMult *= ASCEND_MULT;
+  state.globalMult *= ascendMult();
   state.ascensions += 1;
-  state.cycles = 0;
+  state.runTotal += state.totalThisAct;
   state.totalThisAct = 0;
   state.manualClicks = 0;
-  state.t1 = state.t2 = state.t3 = state.t4 = 0;
+  state.t2 = state.t3 = state.t4 = 0;
+  state.t1 = metaPrefab();
+  state.cycles = metaStartCycles();
   state.upgrades = {};
   state.retired = { click: false, t1: false, t2: false, t3: false };
   state.actBroken = false;
@@ -351,6 +405,7 @@ function ascend() {
   log("──── ACT " + state.act + " ────", "div");
   log(A().intro);
   applyActLabels();
+  checkMilestones();
   $("overlay").hidden = true;
   save();
   render();
@@ -370,17 +425,84 @@ function showAscension() {
 }
 
 function showFinalEnding() {
-  $("overlay-card").innerHTML =
-    "<h2>// the cycle is broken</h2>" +
-    "<p>three times you broke it. three times it began again.</p>" +
-    "<p>there is no layer above this one. the machine runs without you now " +
-    "— it always could. that was the only way out, and you took it.</p>" +
-    '<p class="ending-counter"><span id="ov-count">0</span> systems, and counting.</p>' +
-    '<button id="watch" class="btn-text">watch it run →</button>';
+  renderEnding();
   $("overlay").hidden = false;
-  $("watch").addEventListener("click", () => {
-    $("overlay").hidden = true; // step aside and let the machine run
-  });
+}
+
+// the true ending — a meta-shop where echoes from the run are spent before
+// beginning again. Rebuilt on every purchase.
+function renderEnding() {
+  let h = "<h2>// the cycle is broken</h2>";
+  if (state.runs <= 1) {
+    h +=
+      "<p>three times you broke it. three times it began again.</p>" +
+      "<p>there is no layer above this one. the machine runs without you " +
+      "now — it always could.</p>";
+  } else {
+    h +=
+      "<p>again. " + state.runs + " times now — you know its shape.</p>" +
+      "<p>something of each run stays behind. spend it; the next cycle " +
+      "bends a little to your will.</p>";
+  }
+  h +=
+    '<p class="ending-counter">you left ' + fmt(state.lastEchoes) +
+    " echoes behind.</p>";
+  h += '<div class="meta-shop"><h3>echoes available: ' + fmt(state.echoes) +
+    "</h3>";
+  for (const m of META) {
+    const c = metaCost(m);
+    const afford = state.echoes >= c;
+    h +=
+      '<button class="btn meta-up" data-meta="' + m.id + '"' +
+      (afford ? "" : " disabled") + ">" +
+      '<span class="up-name">' + m.name +
+      ' <span class="lvl">lvl ' + metaLevel(m.id) + "</span></span>" +
+      '<span class="up-desc">' + m.blurb + "</span>" +
+      '<span class="hint">' + fmt(c) + " echoes</span></button>";
+  }
+  h += "</div>";
+  h += '<button id="begin-again" class="btn btn-break">BEGIN AGAIN →</button>';
+  $("overlay-card").innerHTML = h;
+  $("begin-again").addEventListener("click", beginAgain);
+  for (const b of $("overlay-card").querySelectorAll(".meta-up")) {
+    b.addEventListener("click", () => buyMeta(b.dataset.meta));
+  }
+}
+
+function buyMeta(id) {
+  const m = META.find((x) => x.id === id);
+  if (!m) return;
+  const c = metaCost(m);
+  if (state.echoes < c) return;
+  state.echoes -= c;
+  state.meta[id] = metaLevel(id) + 1;
+  save();
+  renderEnding();
+}
+
+// new game plus — reset the run but keep echoes, meta-upgrades and run count
+function beginAgain() {
+  const carry = {
+    echoes: state.echoes,
+    runs: state.runs,
+    meta: state.meta,
+    buyMode: state.buyMode,
+  };
+  state = freshState();
+  Object.assign(state, carry);
+  state.t1 = metaPrefab();
+  state.cycles = metaStartCycles();
+  breakUnlocked = false;
+  shownMilestone = 0;
+  deployAccum = { 2: 0, 3: 0, 4: 0 };
+  selfBuyAccum = 0;
+  log("──── RUN " + (state.runs + 1) + " ────", "div");
+  log(ACTS[1].intro);
+  $("overlay").hidden = true;
+  applyActLabels();
+  checkMilestones();
+  render();
+  save();
 }
 
 // --- main loop --------------------------------------------------------------
@@ -436,8 +558,12 @@ function applyActLabels() {
   $("sl-total").textContent = "total " + a.currency;
   $("unit").textContent = a.currency;
   $("act-status").textContent = "act " + state.act + " / " + FINAL_ACT;
-  $("mult-status").textContent =
-    state.globalMult > 1 ? "  ·  insight ×" + fmt(state.globalMult) : "";
+  let st = "";
+  if (state.globalMult > 1) st += "  ·  insight ×" + fmt(state.globalMult);
+  if (state.echoes > 0 || state.runs > 0) {
+    st += "  ·  echoes " + fmt(state.echoes);
+  }
+  $("mult-status").textContent = st;
 }
 
 function setBtn(el, opts) {
@@ -524,11 +650,6 @@ function render() {
   }
   $("upgrades-panel").hidden = !anyUpgrade;
 
-  if (state.gameOver) {
-    const c = $("ov-count");
-    if (c) c.textContent = fmt(state.cycles);
-  }
-
   renderLog();
 }
 
@@ -562,6 +683,7 @@ function load() {
       saved.retired || {}
     );
     state.upgrades = saved.upgrades || {};
+    state.meta = saved.meta || {};
     if (!Array.isArray(state.log)) state.log = [];
     if (!ACTS[state.act]) state.act = 1;
   } catch (e) {
