@@ -6,7 +6,7 @@
 // That is the joke, and the point.
 "use strict";
 
-const SAVE_KEY = "cycles-save-v4";
+const SAVE_KEY = "cycles-save-v5";
 
 // --- tuning -----------------------------------------------------------------
 const ASCEND_MULT = 4;        // permanent production ×this on each ascension
@@ -91,19 +91,19 @@ const TIER_DEFS = [
 ];
 
 // --- upgrades ---------------------------------------------------------------
-// Per-act one-time purchases — reset on ascension. Cost scales with the act's
-// cost scale (same as buildings) so they stay an affordable choice every act.
+// Per-act upgrades, reset on ascension. Each is generative: buy it as many
+// times as you can afford — cost and effect both scale by level. They are
+// broad (whole-ladder) rather than per-tier, so the set never needs to grow
+// when the tier count does. `per` is the multiplier added per level.
 const UPGRADES = [
-  { id: "muscle", name: "muscle memory", desc: "manual input ×10",
-    cost: 50, unlock: (s) => s.t1 >= 1 },
-  { id: "overclock", name: "overclock", desc: "tier-1 output ×3",
-    cost: 600, unlock: (s) => s.t1 >= 5 },
-  { id: "pipeline", name: "pipelining", desc: "tier-2 automation 2× faster",
-    cost: 2500, unlock: (s) => s.t2 >= 2 },
-  { id: "preempt", name: "preemption", desc: "tier-3 automation 2× faster",
-    cost: 5000, unlock: (s) => s.t3 >= 1 },
-  { id: "autoscale", name: "auto-scaling", desc: "tier-4 automation 2× faster",
-    cost: 60000, unlock: (s) => s.t4 >= 1 },
+  { id: "muscle", name: "muscle memory", effect: "manual input",
+    per: 2, costBase: 80, costMult: 9, unlock: (s) => s.t1 >= 1 },
+  { id: "overclock", name: "overclock", effect: "tier-1 output",
+    per: 1.16, costBase: 1200, costMult: 7, unlock: (s) => s.t1 >= 1 },
+  { id: "pipeline", name: "pipelining", effect: "deploy speed",
+    per: 1.09, costBase: 9000, costMult: 7, unlock: (s) => s.t2 >= 1 },
+  { id: "compounding", name: "compounding", effect: "all production",
+    per: 1.13, costBase: 50000, costMult: 8, unlock: (s) => s.t3 >= 1 },
 ];
 
 // --- meta-prestige ----------------------------------------------------------
@@ -174,9 +174,9 @@ const ACHIEVEMENTS = [
     test: (s) => s["t" + TIER_COUNT] >= 30 },
   { id: "invested", name: "invested", desc: "spend echoes on a meta-upgrade",
     test: (s) => Object.keys(s.meta).length >= 1 },
-  { id: "completionist", name: "completionist",
-    desc: "own all five upgrades in one act",
-    test: (s) => Object.keys(s.upgrades).length >= 5 },
+  { id: "completionist", name: "specialist",
+    desc: "take any upgrade to level 10",
+    test: (s) => Object.values(s.upgrades).some((l) => l >= 10) },
   { id: "eternal", name: "eternal", desc: "finish five full runs",
     test: (s) => s.runs >= 5 },
 ];
@@ -254,8 +254,14 @@ function maxAfford(item, owned, cy) {
   );
 }
 
-const hasUp = (id) => !!state.upgrades[id];
-const upCost = (u) => Math.floor(u.cost * A().costScale);
+// generative upgrades: level lives in state.upgrades[id], effect is per^level
+const upLevel = (id) => state.upgrades[id] || 0;
+const upMult = (id) => {
+  const u = UPGRADES.find((x) => x.id === id);
+  return u ? Math.pow(u.per, upLevel(id)) : 1;
+};
+const upCost = (u) =>
+  Math.floor(u.costBase * A().costScale * Math.pow(u.costMult, upLevel(u.id)));
 
 // tier-1 output doubles for each power of ten of tier-1 buildings owned —
 // log-scaled, so the deep deploy chain can never overflow it.
@@ -263,23 +269,23 @@ function milestoneMult() {
   return Math.pow(2, Math.floor(Math.log10(Math.max(state.t1, 1))));
 }
 function t1EachRate() {
-  return TIER_DEFS[0].rate * (hasUp("overclock") ? 3 : 1) * milestoneMult();
+  return TIER_DEFS[0].rate * upMult("overclock") * milestoneMult();
 }
 function rate() {
   return (
-    state.t1 * t1EachRate() * state.globalMult * metaMult() * achievementMult()
+    state.t1 * t1EachRate() * state.globalMult *
+    metaMult() * achievementMult() * upMult("compounding")
   );
 }
 function manualGain() {
   return (
-    1 * (hasUp("muscle") ? 10 : 1) *
-    state.globalMult * metaMult() * achievementMult()
+    upMult("muscle") * state.globalMult *
+    metaMult() * achievementMult() * upMult("compounding")
   );
 }
-// which upgrade speeds up each tier's deploy cadence
-const TIER_SPEEDUP = { 2: "pipeline", 3: "preempt", 4: "autoscale" };
+// the "pipelining" upgrade speeds every tier's deploy cadence at once
 function tierInterval(t) {
-  return TIER_DEFS[t - 1].interval / (hasUp(TIER_SPEEDUP[t]) ? 2 : 1);
+  return TIER_DEFS[t - 1].interval / upMult("pipeline");
 }
 
 function fmt(n) {
@@ -372,12 +378,12 @@ function purchase(tier) {
 
 function buyUpgrade(id) {
   const u = UPGRADES.find((x) => x.id === id);
-  if (!u || hasUp(id) || !u.unlock(state)) return;
+  if (!u || (upLevel(id) === 0 && !u.unlock(state))) return;
   const c = upCost(u);
   if (state.cycles < c) return;
   state.cycles -= c;
-  state.upgrades[id] = true;
-  log("> upgrade installed: " + u.name + " — " + u.desc + ".");
+  state.upgrades[id] = upLevel(id) + 1;
+  log("> upgrade: " + u.name + " → level " + state.upgrades[id] + ".");
   bump();
   render();
 }
@@ -752,19 +758,22 @@ function render() {
 
   $("break").hidden = !(breakUnlocked && !state.actBroken);
 
-  // upgrades — locked ones stay visible but fogged (?????) until their
-  // unlock condition is met
+  // upgrades — generative (buy repeatedly; cost & effect scale by level).
+  // Locked ones stay visible but fogged (?????) until their condition is met.
   for (const u of UPGRADES) {
     const el = upgradeEls[u.id];
-    const owned = hasUp(u.id);
-    const unlocked = owned || u.unlock(state);
-    el.classList.toggle("retired", owned);
+    const lvl = upLevel(u.id);
+    const unlocked = lvl > 0 || u.unlock(state);
+    const c = upCost(u);
     el.classList.toggle("fog", !unlocked);
-    el.disabled = owned || !unlocked || state.cycles < upCost(u);
-    el.querySelector(".up-name").textContent = unlocked ? u.name : "?????";
-    el.querySelector(".up-desc").textContent = unlocked ? u.desc : "???";
-    el.querySelector(".hint").textContent =
-      owned ? "installed" : unlocked ? fmt(upCost(u)) : "locked";
+    el.disabled = !unlocked || state.cycles < c;
+    el.querySelector(".up-name").textContent =
+      unlocked ? u.name + " · lvl " + lvl : "?????";
+    el.querySelector(".up-desc").textContent = unlocked
+      ? u.effect + " ×" + upMult(u.id).toFixed(2) +
+        "  ·  +" + Math.round((u.per - 1) * 100) + "%/lvl"
+      : "???";
+    el.querySelector(".hint").textContent = unlocked ? fmt(c) : "locked";
   }
 
   renderAchievements();
