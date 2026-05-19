@@ -136,6 +136,16 @@ main {
   margin-bottom: 18px;
 }
 
+/* generated buy buttons — same vertical rhythm as the rest of the controls */
+#buy-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* generated building stat rows sit transparently inside .stats */
+#building-stats { display: contents; }
+
 /* buy-quantity toggle */
 .qty {
   display: flex;
@@ -252,6 +262,11 @@ main {
 }
 .upgrade.retired { text-decoration: none; }
 .upgrade.retired .up-name { text-decoration: line-through; }
+
+/* fog of war — locked upgrades show as obscured slots */
+.upgrade.fog .up-name,
+.upgrade.fog .up-desc { color: var(--fg-faint); letter-spacing: 2px; }
+.ach.locked .ach-name { color: var(--fg-faint); letter-spacing: 2px; }
 
 footer {
   max-width: 880px;

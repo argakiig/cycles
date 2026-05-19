@@ -13,9 +13,10 @@ When the machine is fully self-sufficient you **BREAK THE CYCLE** — and a new
 abstraction takes over, one layer up, and the whole thing begins again, faster
 and more self-aware. Three acts. You never actually escape. That's the point.
 
-Each act is a four-tier automation chain — every tier deploys the one below it.
-Along the way, per-act **upgrades** and tier-1 **milestone bonuses** deepen the
-climb. A full run through all three acts takes roughly 15–20 minutes.
+Each act is a **ten-tier** automation chain — every tier deploys the one below
+it, and buying into a tier retires the buy button beneath it. Along the way,
+per-act **upgrades** and tier-1 **milestone bonuses** deepen the climb. A full
+run through all three acts takes roughly 20 minutes.
 
 Finishing all three acts banks **echoes** — a permanent currency spent between
 runs on run-wide bonuses (production, head starts, a steeper ascension curve).
