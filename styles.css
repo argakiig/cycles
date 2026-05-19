@@ -136,6 +136,30 @@ main {
   margin-bottom: 18px;
 }
 
+/* buy-quantity toggle */
+.qty {
+  display: flex;
+  gap: 6px;
+}
+.qty-btn {
+  flex: 1;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--fg-dim);
+  background: #0a120a;
+  border: 1px solid var(--fg-faint);
+  border-radius: 3px;
+  padding: 5px 4px;
+  cursor: pointer;
+  transition: background 0.08s;
+}
+.qty-btn:hover { background: #112011; }
+.qty-btn.active {
+  color: var(--bg);
+  background: var(--fg-dim);
+  border-color: var(--fg-dim);
+}
+
 .btn {
   font-family: inherit;
   font-size: 14px;

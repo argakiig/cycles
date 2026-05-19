@@ -88,17 +88,19 @@ const ACTS = {
 };
 
 // --- upgrades ---------------------------------------------------------------
-// Per-act one-time purchases — reset on ascension. Cost scales with the global
-// multiplier so they stay meaningful in every act.
+// Per-act one-time purchases — reset on ascension. Cost scales with the act's
+// cost scale (same as buildings) so they stay an affordable choice every act.
+// They are priced below the daemon you are saving for, so they are a real
+// mid-act choice rather than something you can never reach.
 const UPGRADES = [
   { id: "muscle", name: "muscle memory", desc: "manual input ×10",
-    cost: 80, unlock: (s) => s.t1 >= 1 },
+    cost: 50, unlock: (s) => s.t1 >= 1 },
   { id: "overclock", name: "overclock", desc: "tier-1 output ×3",
-    cost: 900, unlock: (s) => s.t1 >= 8 },
+    cost: 600, unlock: (s) => s.t1 >= 5 },
   { id: "pipeline", name: "pipelining", desc: "tier-2 automation 2× faster",
-    cost: 5000, unlock: (s) => s.t2 >= 4 },
+    cost: 2500, unlock: (s) => s.t2 >= 2 },
   { id: "preempt", name: "preemption", desc: "tier-3 automation 2× faster",
-    cost: 20000, unlock: (s) => s.t3 >= 2 },
+    cost: 5000, unlock: (s) => s.t3 >= 1 },
 ];
 
 // --- state ------------------------------------------------------------------
@@ -115,6 +117,7 @@ function freshState() {
     retired: { click: false, t1: false, t2: false },
     actBroken: false,  // current act's cycle broken, awaiting ascension
     gameOver: false,   // final act broken — true ending reached
+    buyMode: 1,        // buildings bought per click of a buy button: 1, 10, "max"
     lastSeen: Date.now(),
     log: [],
   };
@@ -133,15 +136,27 @@ let shownMilestone = 0;
 const $ = (id) => document.getElementById(id);
 const A = () => ACTS[state.act];
 
-function cost(item, owned) {
-  return Math.floor(item.base * Math.pow(item.mult, owned) * A().costScale);
+const tierItem = (t) => (t === 1 ? A().t1 : t === 2 ? A().t2 : A().t3);
+const tierOwned = (t) => (t === 1 ? state.t1 : t === 2 ? state.t2 : state.t3);
+
+// total cost of buying `n` of an item starting from `owned` (geometric series)
+function bulkCost(item, owned, n) {
+  if (n <= 0) return 0;
+  const unit = item.base * A().costScale * Math.pow(item.mult, owned);
+  return Math.floor((unit * (Math.pow(item.mult, n) - 1)) / (item.mult - 1));
 }
-const t1Cost = () => cost(A().t1, state.t1);
-const t2Cost = () => cost(A().t2, state.t2);
-const t3Cost = () => cost(A().t3, state.t3);
+
+// largest quantity of an item buyable with `cy` cycles
+function maxAfford(item, owned, cy) {
+  const unit = item.base * A().costScale * Math.pow(item.mult, owned);
+  if (cy < unit) return 0;
+  return Math.floor(
+    Math.log(1 + (cy * (item.mult - 1)) / unit) / Math.log(item.mult)
+  );
+}
 
 const hasUp = (id) => !!state.upgrades[id];
-const upCost = (u) => Math.floor(u.cost * state.globalMult);
+const upCost = (u) => Math.floor(u.cost * A().costScale);
 
 // tier-1 output doubles for every MILESTONE_EVERY units owned
 function milestoneMult() {
@@ -212,37 +227,39 @@ function earn(amount) {
 }
 
 // --- purchases --------------------------------------------------------------
-function buyT1(byPlayer) {
-  const c = t1Cost();
-  if (state.cycles < c) return false;
-  state.cycles -= c;
-  state.t1++;
-  if (byPlayer && state.t1 === 1) {
-    log("> " + A().t1.name + " online. it runs cycles so you don't have to.");
+// how many buildings the player buys per click of a buy button
+function buyCount(tier) {
+  if (state.buyMode === "max") {
+    return maxAfford(tierItem(tier), tierOwned(tier), state.cycles);
   }
-  return true;
+  return state.buyMode;
 }
 
-function buyT2(byPlayer) {
-  const c = t2Cost();
-  if (state.cycles < c) return false;
+function purchase(tier) {
+  if (tier === 1 && state.retired.t1) return;
+  if (tier === 2 && state.retired.t2) return;
+  if (tier === 3 && state.actBroken) return;
+  const item = tierItem(tier);
+  const owned = tierOwned(tier);
+  const n = buyCount(tier);
+  if (n < 1) return;
+  const c = bulkCost(item, owned, n);
+  if (state.cycles < c) return;
   state.cycles -= c;
-  state.t2++;
-  if (byPlayer && state.t2 === 1) {
-    log("> " + A().t2.name + " online. it deploys " + A().t1.name + "s on its own.");
+  if (tier === 1) state.t1 += n;
+  else if (tier === 2) state.t2 += n;
+  else state.t3 += n;
+  if (owned === 0) {
+    if (tier === 1) {
+      log("> " + A().t1.name + " online. it runs cycles so you don't have to.");
+    } else if (tier === 2) {
+      log("> " + A().t2.name + " online. it deploys " + A().t1.name + "s on its own.");
+    } else {
+      log("> " + A().t3.name + " online. it deploys " + A().t2.name + "s on its own.");
+    }
   }
-  return true;
-}
-
-function buyT3(byPlayer) {
-  const c = t3Cost();
-  if (state.cycles < c) return false;
-  state.cycles -= c;
-  state.t3++;
-  if (byPlayer && state.t3 === 1) {
-    log("> " + A().t3.name + " online. it deploys " + A().t2.name + "s on its own.");
-  }
-  return true;
+  bump();
+  render();
 }
 
 function buyUpgrade(id) {
@@ -441,9 +458,12 @@ function render() {
   $("rate").textContent = "+" + fmt(rate()) + " /s";
   $("hint-click").textContent = "+" + fmt(manualGain());
 
+  // stats — tier-2/3 show their live deploy rate, so adding more visibly counts
   $("n-t1").textContent = fmt(state.t1);
-  $("n-t2").textContent = fmt(state.t2);
-  $("n-t3").textContent = fmt(state.t3);
+  $("n-t2").textContent =
+    fmt(state.t2) + "  ·  +" + (state.t2 / t2Interval()).toFixed(1) + "/s";
+  $("n-t3").textContent =
+    fmt(state.t3) + "  ·  +" + (state.t3 / t3Interval()).toFixed(1) + "/s";
   $("n-total").textContent = fmt(state.totalThisAct);
   $("n-clicks").textContent = fmt(state.manualClicks);
 
@@ -452,26 +472,27 @@ function render() {
   $("n-milestone").textContent =
     "×" + Math.pow(2, mm) + " (+" + toNext + " to next)";
 
-  $("cost-t1").textContent = fmt(t1Cost());
-  $("cost-t2").textContent = fmt(t2Cost());
-  $("cost-t3").textContent = fmt(t3Cost());
+  // buy-quantity toggle highlight
+  for (const b of document.querySelectorAll(".qty-btn")) {
+    const m = b.dataset.mode === "max" ? "max" : Number(b.dataset.mode);
+    b.classList.toggle("active", state.buyMode === m);
+  }
 
   setBtn($("click"), { visible: true, retired: state.retired.click, enabled: true });
-  setBtn($("buy-t1"), {
-    visible: true,
-    retired: state.retired.t1,
-    enabled: state.cycles >= t1Cost(),
-  });
-  setBtn($("buy-t2"), {
-    visible: state.t1 >= 1,
-    retired: state.retired.t2,
-    enabled: state.cycles >= t2Cost(),
-  });
-  setBtn($("buy-t3"), {
-    visible: state.t2 >= 1,
-    retired: state.actBroken,
-    enabled: state.cycles >= t3Cost(),
-  });
+
+  // buy buttons — quantity and total cost track the current buy-mode
+  const buyVis = { 1: true, 2: state.t1 >= 1, 3: state.t2 >= 1 };
+  const buyRet = { 1: state.retired.t1, 2: state.retired.t2, 3: state.actBroken };
+  for (const tier of [1, 2, 3]) {
+    const n = buyCount(tier);
+    const c = bulkCost(tierItem(tier), tierOwned(tier), Math.max(n, 1));
+    $("cost-t" + tier).textContent = "×" + n + " · " + fmt(c);
+    setBtn($("buy-t" + tier), {
+      visible: buyVis[tier],
+      retired: buyRet[tier],
+      enabled: n >= 1 && state.cycles >= c,
+    });
+  }
 
   $("break").hidden = !(breakUnlocked && !state.actBroken);
 
@@ -577,15 +598,17 @@ function doClick() {
 
 function wireUp() {
   $("click").addEventListener("click", doClick);
-  $("buy-t1").addEventListener("click", () => {
-    if (!state.retired.t1 && buyT1(true)) { bump(); render(); }
-  });
-  $("buy-t2").addEventListener("click", () => {
-    if (!state.retired.t2 && buyT2(true)) { bump(); render(); }
-  });
-  $("buy-t3").addEventListener("click", () => {
-    if (!state.actBroken && buyT3(true)) { bump(); render(); }
-  });
+  $("buy-t1").addEventListener("click", () => purchase(1));
+  $("buy-t2").addEventListener("click", () => purchase(2));
+  $("buy-t3").addEventListener("click", () => purchase(3));
+
+  // buy-quantity toggle
+  for (const b of document.querySelectorAll(".qty-btn")) {
+    b.addEventListener("click", () => {
+      state.buyMode = b.dataset.mode === "max" ? "max" : Number(b.dataset.mode);
+      render();
+    });
+  }
   $("break").addEventListener("click", breakTheCycle);
   $("wipe").addEventListener("click", wipe);
 
