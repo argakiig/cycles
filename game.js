@@ -173,6 +173,7 @@ function freshState() {
     echoes: 0,         // spendable meta-currency — persists across runs
     runs: 0,           // completed full runs — persists across runs
     meta: {},          // meta-upgrade id -> level — persists across runs
+    settings: { crt: true, notation: "standard" },
     lastSeen: Date.now(),
     log: [],
   };
@@ -237,6 +238,9 @@ function tierInterval(t) {
 function fmt(n) {
   n = Math.floor(n);
   if (n < 1000) return String(n);
+  if (state.settings && state.settings.notation === "scientific") {
+    return n.toExponential(2);
+  }
   const units = ["", "k", "M", "B", "T", "q", "Q", "s", "S", "O", "N", "D"];
   let u = 0;
   while (n >= 1000 && u < units.length - 1) {
@@ -487,6 +491,7 @@ function beginAgain() {
     runs: state.runs,
     meta: state.meta,
     buyMode: state.buyMode,
+    settings: state.settings,
   };
   state = freshState();
   Object.assign(state, carry);
@@ -684,6 +689,10 @@ function load() {
     );
     state.upgrades = saved.upgrades || {};
     state.meta = saved.meta || {};
+    state.settings = Object.assign(
+      { crt: true, notation: "standard" },
+      saved.settings || {}
+    );
     if (!Array.isArray(state.log)) state.log = [];
     if (!ACTS[state.act]) state.act = 1;
   } catch (e) {
@@ -698,11 +707,12 @@ function load() {
 
   // offline progress: tier-1 production only (automation is not simulated)
   const elapsed = Math.min((Date.now() - state.lastSeen) / 1000, OFFLINE_CAP);
-  if (elapsed > 60 && state.t1 > 0 && !state.gameOver) {
+  if (elapsed > 60 && state.t1 > 0 && !state.gameOver && !state.actBroken) {
     const earned = elapsed * rate();
     earn(earned);
     log("> resumed after " + Math.floor(elapsed / 60) +
         " min idle. tier-1 earned " + fmt(earned) + " " + A().currency + ".");
+    showOffline(elapsed, earned);
   } else {
     log("> session resumed.");
   }
@@ -712,7 +722,9 @@ function load() {
 }
 
 function wipe() {
-  if (!window.confirm("Wipe your save and start over from act 1?")) return;
+  if (!window.confirm("Wipe ALL progress — echoes, meta-upgrades, everything?")) {
+    return;
+  }
   wiping = true;
   try {
     localStorage.removeItem(SAVE_KEY);
@@ -720,6 +732,109 @@ function wipe() {
     /* ignore */
   }
   location.reload();
+}
+
+// --- settings & modals ------------------------------------------------------
+function applySettings() {
+  document.body.classList.toggle("no-crt", !state.settings.crt);
+}
+
+function closeModal() {
+  $("modal").hidden = true;
+}
+
+function openSettings() {
+  renderSettings();
+  $("modal").hidden = false;
+}
+
+function renderSettings() {
+  const s = state.settings;
+  $("modal-card").innerHTML =
+    "<h2>// settings</h2>" +
+    '<div class="setting"><span>CRT scanlines</span>' +
+    '<button id="set-crt" class="toggle">' + (s.crt ? "on" : "off") +
+    "</button></div>" +
+    '<div class="setting"><span>number format</span>' +
+    '<button id="set-notation" class="toggle">' + s.notation +
+    "</button></div>" +
+    '<div class="settings-section"><h3>save data</h3>' +
+    '<button id="set-export" class="btn">export — copy save to clipboard</button>' +
+    '<textarea id="set-import-text" placeholder="paste a save string to import…">' +
+    "</textarea>" +
+    '<button id="set-import" class="btn">import save</button>' +
+    '<p id="set-msg" class="set-msg"></p></div>' +
+    '<button id="set-wipe" class="btn-text">wipe all progress</button>' +
+    '<button id="set-close" class="btn btn-break">CLOSE</button>';
+  $("set-crt").addEventListener("click", () => {
+    s.crt = !s.crt;
+    applySettings();
+    save();
+    renderSettings();
+  });
+  $("set-notation").addEventListener("click", () => {
+    s.notation = s.notation === "standard" ? "scientific" : "standard";
+    save();
+    renderSettings();
+  });
+  $("set-export").addEventListener("click", exportSave);
+  $("set-import").addEventListener("click", importSave);
+  $("set-wipe").addEventListener("click", wipe);
+  $("set-close").addEventListener("click", closeModal);
+}
+
+function exportSave() {
+  const str = btoa(unescape(encodeURIComponent(JSON.stringify(state))));
+  $("set-import-text").value = str;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(str).then(
+      () => { $("set-msg").textContent = "save copied to clipboard."; },
+      () => { $("set-msg").textContent = "select the text above and copy it."; }
+    );
+  } else {
+    $("set-msg").textContent = "select the text above and copy it.";
+  }
+}
+
+function importSave() {
+  const raw = $("set-import-text").value.trim();
+  if (!raw) {
+    $("set-msg").textContent = "paste a save string first.";
+    return;
+  }
+  let obj;
+  try {
+    obj = JSON.parse(decodeURIComponent(escape(atob(raw))));
+  } catch (e) {
+    $("set-msg").textContent = "could not read that save string.";
+    return;
+  }
+  if (!obj || typeof obj.act !== "number") {
+    $("set-msg").textContent = "that is not a CYCLES save.";
+    return;
+  }
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify(obj));
+  } catch (e) {
+    /* ignore */
+  }
+  $("set-msg").textContent = "save imported — reloading…";
+  wiping = true; // keep the unload save from overwriting the imported data
+  location.reload();
+}
+
+function showOffline(elapsed, earned) {
+  const mins = Math.floor(elapsed / 60);
+  const timeStr =
+    mins >= 60 ? Math.floor(mins / 60) + "h " + (mins % 60) + "m" : mins + "m";
+  $("modal-card").innerHTML =
+    "<h2>// while you were away</h2>" +
+    "<p>idle for " + timeStr + ".</p>" +
+    "<p>tier-1 automation kept running:</p>" +
+    '<p class="ending-counter">+' + fmt(earned) + " " + A().currency + "</p>" +
+    '<button id="off-close" class="btn btn-break">COLLECT</button>';
+  $("modal").hidden = false;
+  $("off-close").addEventListener("click", closeModal);
 }
 
 // --- input ------------------------------------------------------------------
@@ -748,13 +863,18 @@ function wireUp() {
     });
   }
   $("break").addEventListener("click", breakTheCycle);
-  $("wipe").addEventListener("click", wipe);
+  $("open-settings").addEventListener("click", openSettings);
+  $("modal").addEventListener("click", (e) => {
+    if (e.target.id === "modal") closeModal(); // click the backdrop to dismiss
+  });
 
-  // spacebar runs a cycle, while that is still yours to do
   window.addEventListener("keydown", (e) => {
+    // spacebar runs a cycle, while that is still yours to do
     if (e.code === "Space" && !e.repeat) {
       e.preventDefault();
       doClick();
+    } else if (e.code === "Escape") {
+      closeModal();
     }
   });
 
@@ -767,6 +887,7 @@ function wireUp() {
 // --- start ------------------------------------------------------------------
 buildUpgrades();
 load();
+applySettings();
 wireUp();
 applyActLabels();
 checkMilestones();

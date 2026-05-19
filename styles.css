@@ -325,6 +325,65 @@ footer {
   align-self: flex-start;
   margin-top: 4px;
 }
+
+/* settings modal */
+.setting {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 12px 0;
+}
+.toggle {
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--fg);
+  background: #0a120a;
+  border: 1px solid var(--fg-dim);
+  border-radius: 3px;
+  padding: 5px 14px;
+  cursor: pointer;
+  min-width: 100px;
+}
+.toggle:hover { background: #112011; }
+.settings-section {
+  border-top: 1px solid var(--fg-faint);
+  margin-top: 16px;
+  padding-top: 14px;
+  text-align: center;
+}
+.settings-section h3 {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: normal;
+  color: var(--fg-dim);
+}
+.settings-section .btn {
+  width: 100%;
+  margin-bottom: 6px;
+  text-align: center;
+}
+#set-import-text {
+  width: 100%;
+  height: 56px;
+  resize: vertical;
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--fg-dim);
+  background: #0a120a;
+  border: 1px solid var(--fg-faint);
+  border-radius: 3px;
+  padding: 6px;
+  margin-bottom: 6px;
+}
+.set-msg {
+  color: var(--warn);
+  font-size: 12px;
+  min-height: 16px;
+  margin: 4px 0 0;
+}
+
+/* CRT scanlines off */
+body.no-crt .scanlines { display: none; }
 .ending-card h2 {
   color: var(--break);
   font-weight: normal;

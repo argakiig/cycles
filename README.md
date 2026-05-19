@@ -33,8 +33,10 @@ python3 -m http.server
 # then visit http://localhost:8000
 ```
 
-Progress autosaves to your browser's `localStorage` (with offline progress while
-away). Use **wipe save** in the footer to start over.
+Progress autosaves to your browser's `localStorage`; return after time away and
+an offline-progress summary tells you what the machine earned. The **settings**
+panel (footer) holds save export/import, a CRT-effect toggle, a number-format
+choice, and a full wipe.
 
 ## Deploy to GitHub Pages
 
