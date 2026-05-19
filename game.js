@@ -184,6 +184,35 @@ const achievementCount = () => Object.keys(state.achievements).length;
 // every unlocked achievement is a permanent +3% to all production
 const achievementMult = () => 1 + 0.03 * achievementCount();
 
+// --- the crew ---------------------------------------------------------------
+// One worker per tier. Each has a unique mechanic and its own unlock
+// requirement, met by playing. Per-act — they re-unlock every act, and stay
+// fogged until their requirement is hit.
+const WORKERS = [
+  { id: "intern", name: "the intern", req: (s) => s.manualClicks >= 15,
+    effect: "manual clicks also build auto-clickers" },
+  { id: "kiddie", name: "script kiddie", req: (s) => s.t2 >= 5,
+    effect: "tier-2 deploys two at a time" },
+  { id: "nerd", name: "the nerd", req: (s) => s.t1 >= 1000,
+    effect: "tier-3 doubles as a producer" },
+  { id: "neckbeard", name: "neckbeard", req: (s) => s.t4 >= 8,
+    effect: "tier-4 slowly builds itself" },
+  { id: "sysadmin", name: "the sysadmin", req: (s) => s.t5 >= 8,
+    effect: "tier-5 deploys 3× faster" },
+  { id: "hacker", name: "the hacker", req: (s) => s.t1 >= 1e6,
+    effect: "tier-6 also deploys tier-4" },
+  { id: "devops", name: "devops", req: (s) => s.t7 >= 6,
+    effect: "tier-7 auto-buys itself, free" },
+  { id: "architect", name: "the architect",
+    req: (s) => Object.keys(s.upgrades).length >= 4,
+    effect: "tier-8 deploys three at a time" },
+  { id: "greybeard", name: "the greybeard", req: (s) => s.t9 >= 8,
+    effect: "tier-9 deploys 6× faster" },
+  { id: "tenx", name: "the 10x engineer", req: (s) => s.t10 >= 3,
+    effect: "every tier-10 deploys as ten" },
+];
+const hasWorker = (id) => !!state.workers[id];
+
 // --- state ------------------------------------------------------------------
 // retired tracks which controls the machine has taken over: the manual click,
 // then each tier's buy button as the tier above it comes online.
@@ -201,7 +230,8 @@ function freshState() {
     manualClicks: 0,
     globalMult: 1,     // permanent production multiplier from ascensions
     ascensions: 0,
-    upgrades: {},      // id -> true (current act only)
+    upgrades: {},      // id -> level (current act only)
+    workers: {},       // worker id -> true (current act only)
     retired: freshRetired(),
     actBroken: false,  // current act's cycle broken, awaiting ascension
     gameOver: false,   // final act broken — true ending reached
@@ -226,6 +256,7 @@ let state = freshState();
 // deployAccum[from] tracks tier `from` deploying tier `from - 1`.
 let deployAccum = new Array(TIER_COUNT + 1).fill(0);
 let selfBuyAccum = 0;
+let workerAccum = { neckbeard: 0, hacker: 0, devops: 0 };
 let breakUnlocked = false;
 let shownMilestone = 0;
 let wiping = false; // set during a save wipe so nothing re-persists on reload
@@ -271,9 +302,13 @@ function milestoneMult() {
 function t1EachRate() {
   return TIER_DEFS[0].rate * upMult("overclock") * milestoneMult();
 }
+// the nerd lets tier-3 pull double duty as a producer
+function effectiveT1() {
+  return state.t1 + (hasWorker("nerd") ? state.t3 * 5 : 0);
+}
 function rate() {
   return (
-    state.t1 * t1EachRate() * state.globalMult *
+    effectiveT1() * t1EachRate() * state.globalMult *
     metaMult() * achievementMult() * upMult("compounding")
   );
 }
@@ -283,9 +318,13 @@ function manualGain() {
     metaMult() * achievementMult() * upMult("compounding")
   );
 }
-// the "pipelining" upgrade speeds every tier's deploy cadence at once
+// the "pipelining" upgrade speeds every tier's deploy cadence; the sysadmin
+// and greybeard workers speed their own tier further
 function tierInterval(t) {
-  return TIER_DEFS[t - 1].interval / upMult("pipeline");
+  let iv = TIER_DEFS[t - 1].interval / upMult("pipeline");
+  if (t === 5 && hasWorker("sysadmin")) iv /= 3;
+  if (t === 9 && hasWorker("greybeard")) iv /= 6;
+  return iv;
 }
 
 function fmt(n) {
@@ -423,6 +462,15 @@ function checkAchievements() {
   }
 }
 
+function checkWorkers() {
+  for (const w of WORKERS) {
+    if (!state.workers[w.id] && w.req(state)) {
+      state.workers[w.id] = true;
+      log("> " + w.name + " joins the crew: " + w.effect + ".", "warn");
+    }
+  }
+}
+
 // --- breaking the cycle -----------------------------------------------------
 function breakTheCycle() {
   if (state.actBroken) return;
@@ -456,12 +504,14 @@ function ascend() {
   state.t1 = metaPrefab();
   state.cycles = metaStartCycles();
   state.upgrades = {};
+  state.workers = {};
   state.retired = freshRetired();
   state.actBroken = false;
   breakUnlocked = false;
   shownMilestone = 0;
   deployAccum = new Array(TIER_COUNT + 1).fill(0);
   selfBuyAccum = 0;
+  workerAccum = { neckbeard: 0, hacker: 0, devops: 0 };
 
   log("");
   log("──── ACT " + state.act + " ────", "div");
@@ -560,6 +610,7 @@ function beginAgain() {
   shownMilestone = 0;
   deployAccum = new Array(TIER_COUNT + 1).fill(0);
   selfBuyAccum = 0;
+  workerAccum = { neckbeard: 0, hacker: 0, devops: 0 };
   log("──── RUN " + (state.runs + 1) + " ────", "div");
   log(ACTS[1].intro);
   $("overlay").hidden = true;
@@ -587,18 +638,35 @@ function step(dt) {
   if (state.t1 > 0) earn(dt * rate());
 
   // tier N deploys tier N-1 for free — automation creates, it does not shop.
-  // The escalating purchase price of the next tier you buy by hand is the
-  // only gate. (Spending a shared pool here would starve the deployers and
-  // buying more would feel like nothing happened — they spawn instead.)
+  // Crew workers bend this: the 10x engineer multiplies tier-10's reach;
+  // script kiddie and the architect make their tier deploy in bursts.
   for (let from = TIER_COUNT; from >= 2; from--) {
-    const owned = state["t" + from];
-    if (owned > 0) {
-      deployAccum[from] += (dt * owned) / tierInterval(from);
-      while (deployAccum[from] >= 1) {
-        state["t" + (from - 1)]++;
-        deployAccum[from] -= 1;
-      }
+    let owned = state["t" + from];
+    if (owned <= 0) continue;
+    if (from === TIER_COUNT && hasWorker("tenx")) owned *= 10;
+    let burst = 1;
+    if (from === 2 && hasWorker("kiddie")) burst = 2;
+    if (from === 8 && hasWorker("architect")) burst = 3;
+    deployAccum[from] += (dt * owned) / tierInterval(from);
+    while (deployAccum[from] >= 1) {
+      state["t" + (from - 1)] += burst;
+      deployAccum[from] -= 1;
     }
+  }
+
+  // crew side-channels: neckbeard trickles free tier-4, the hacker has
+  // tier-6 also feed tier-4, devops keeps buying tier-7 for free
+  if (hasWorker("neckbeard")) {
+    workerAccum.neckbeard += dt / 2.5;
+    while (workerAccum.neckbeard >= 1) { state.t4++; workerAccum.neckbeard -= 1; }
+  }
+  if (hasWorker("hacker") && state.t6 > 0) {
+    workerAccum.hacker += (dt * state.t6) / tierInterval(6);
+    while (workerAccum.hacker >= 1) { state.t4++; workerAccum.hacker -= 1; }
+  }
+  if (hasWorker("devops")) {
+    workerAccum.devops += dt / 4;
+    while (workerAccum.devops >= 1) { state.t7++; workerAccum.devops -= 1; }
   }
 
   // after the cycle is broken, the top tier replicates itself
@@ -612,6 +680,7 @@ function step(dt) {
 
   checkMilestones();
   checkAchievements();
+  checkWorkers();
 }
 
 // --- rendering --------------------------------------------------------------
@@ -716,6 +785,38 @@ function renderAchievements() {
   $("ach-count").textContent = count + " / " + ACHIEVEMENTS.length;
 }
 
+let workerEls = {};
+
+function buildWorkers() {
+  const wrap = $("workers");
+  wrap.innerHTML = "";
+  workerEls = {};
+  for (const w of WORKERS) {
+    const d = document.createElement("div");
+    d.className = "ach locked";
+    d.innerHTML =
+      '<span class="ach-name"></span>' +
+      '<span class="ach-desc"></span>';
+    wrap.appendChild(d);
+    workerEls[w.id] = d;
+  }
+}
+
+function renderWorkers() {
+  // locked workers stay fogged until their per-act requirement is met
+  let count = 0;
+  for (const w of WORKERS) {
+    const got = !!state.workers[w.id];
+    if (got) count++;
+    const el = workerEls[w.id];
+    el.classList.toggle("unlocked", got);
+    el.classList.toggle("locked", !got);
+    el.querySelector(".ach-name").textContent = got ? w.name : "?????";
+    el.querySelector(".ach-desc").textContent = got ? w.effect : "???";
+  }
+  $("worker-count").textContent = count + " / " + WORKERS.length;
+}
+
 function render() {
   $("cycles").textContent = fmt(state.cycles);
   $("rate").textContent = "+" + fmt(rate()) + " /s";
@@ -777,6 +878,7 @@ function render() {
   }
 
   renderAchievements();
+  renderWorkers();
   renderLog();
 }
 
@@ -807,6 +909,7 @@ function load() {
     state = Object.assign(freshState(), saved);
     state.retired = Object.assign(freshRetired(), saved.retired || {});
     state.upgrades = saved.upgrades || {};
+    state.workers = saved.workers || {};
     state.meta = saved.meta || {};
     state.achievements = saved.achievements || {};
     state.settings = Object.assign(
@@ -962,6 +1065,7 @@ function doClick() {
   if (state.retired.click) return;
   earn(manualGain());
   state.manualClicks++;
+  if (hasWorker("intern")) state.t1++; // the intern builds while you click
   const b = $("click");
   b.classList.add("pulse");
   setTimeout(() => b.classList.remove("pulse"), 70);
@@ -1004,6 +1108,7 @@ function wireUp() {
 // --- start ------------------------------------------------------------------
 buildTiers();
 buildUpgrades();
+buildWorkers();
 buildAchievements();
 load();
 applySettings();
