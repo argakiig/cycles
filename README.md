@@ -21,6 +21,9 @@ Finishing all three acts banks **echoes** — a permanent currency spent between
 runs on run-wide bonuses (production, head starts, a steeper ascension curve).
 Each new playthrough bends a little more to your will. You still never escape.
 
+Twelve **achievements** track milestones across every run; each one unlocked is
+a small permanent production bonus.
+
 ## Play
 
 Play online at **https://argakiig.xyz/cycles/**, or open `index.html` in any

@@ -153,6 +153,42 @@ function echoesEarned() {
   );
 }
 
+// --- achievements -----------------------------------------------------------
+// Each is a plain predicate on the state, checked every tick. Every one
+// unlocked grants a small permanent production bonus. Unlocks persist across
+// runs — only a wipe clears them.
+const ACHIEVEMENTS = [
+  { id: "first-input", name: "first input", desc: "run a cycle by hand",
+    test: (s) => s.manualClicks >= 1 },
+  { id: "delegation", name: "delegation", desc: "deploy a tier-2 building",
+    test: (s) => s.t2 >= 1 },
+  { id: "deprecated", name: "deprecated",
+    desc: "let the machine retire your clicking",
+    test: (s) => s.retired.click },
+  { id: "fourth-wall", name: "the fourth wall", desc: "reach the top tier",
+    test: (s) => s.t4 >= 1 },
+  { id: "ascendant", name: "ascendant", desc: "ascend to a new act",
+    test: (s) => s.ascensions >= 1 },
+  { id: "escape", name: "escape velocity", desc: "finish a full three-act run",
+    test: (s) => s.runs >= 1 },
+  { id: "stockpile", name: "stockpile", desc: "hold a million at once",
+    test: (s) => s.cycles >= 1e6 },
+  { id: "swarm", name: "swarm", desc: "own 250 tier-1 buildings",
+    test: (s) => s.t1 >= 250 },
+  { id: "overlord", name: "overlord", desc: "own 25 top-tier buildings",
+    test: (s) => s.t4 >= 25 },
+  { id: "invested", name: "invested", desc: "spend echoes on a meta-upgrade",
+    test: (s) => Object.keys(s.meta).length >= 1 },
+  { id: "completionist", name: "completionist",
+    desc: "own all five upgrades in one act",
+    test: (s) => Object.keys(s.upgrades).length >= 5 },
+  { id: "eternal", name: "eternal", desc: "finish five full runs",
+    test: (s) => s.runs >= 5 },
+];
+const achievementCount = () => Object.keys(state.achievements).length;
+// every unlocked achievement is a permanent +3% to all production
+const achievementMult = () => 1 + 0.03 * achievementCount();
+
 // --- state ------------------------------------------------------------------
 function freshState() {
   return {
@@ -173,6 +209,7 @@ function freshState() {
     echoes: 0,         // spendable meta-currency — persists across runs
     runs: 0,           // completed full runs — persists across runs
     meta: {},          // meta-upgrade id -> level — persists across runs
+    achievements: {},  // achievement id -> true — persists across runs
     settings: { crt: true, notation: "standard" },
     lastSeen: Date.now(),
     log: [],
@@ -224,10 +261,15 @@ function t1EachRate() {
   return A().t1.rate * (hasUp("overclock") ? 3 : 1) * milestoneMult();
 }
 function rate() {
-  return state.t1 * t1EachRate() * state.globalMult * metaMult();
+  return (
+    state.t1 * t1EachRate() * state.globalMult * metaMult() * achievementMult()
+  );
 }
 function manualGain() {
-  return 1 * (hasUp("muscle") ? 10 : 1) * state.globalMult * metaMult();
+  return (
+    1 * (hasUp("muscle") ? 10 : 1) *
+    state.globalMult * metaMult() * achievementMult()
+  );
 }
 // which upgrade speeds up each tier's deploy cadence
 const TIER_SPEEDUP = { 2: "pipeline", 3: "preempt", 4: "autoscale" };
@@ -363,6 +405,15 @@ function checkMilestones() {
   }
 }
 
+function checkAchievements() {
+  for (const a of ACHIEVEMENTS) {
+    if (!state.achievements[a.id] && a.test(state)) {
+      state.achievements[a.id] = true;
+      log("> achievement unlocked: " + a.name + " — " + a.desc + ".", "big");
+    }
+  }
+}
+
 // --- breaking the cycle -----------------------------------------------------
 function breakTheCycle() {
   if (state.actBroken) return;
@@ -490,6 +541,7 @@ function beginAgain() {
     echoes: state.echoes,
     runs: state.runs,
     meta: state.meta,
+    achievements: state.achievements,
     buyMode: state.buyMode,
     settings: state.settings,
   };
@@ -550,6 +602,7 @@ function step(dt) {
   }
 
   checkMilestones();
+  checkAchievements();
 }
 
 // --- rendering --------------------------------------------------------------
@@ -595,6 +648,34 @@ function buildUpgrades() {
     wrap.appendChild(b);
     upgradeEls[u.id] = b;
   }
+}
+
+let achEls = {};
+
+function buildAchievements() {
+  const wrap = $("achievements");
+  wrap.innerHTML = "";
+  achEls = {};
+  for (const a of ACHIEVEMENTS) {
+    const d = document.createElement("div");
+    d.className = "ach locked";
+    d.innerHTML =
+      '<span class="ach-name">' + a.name + "</span>" +
+      '<span class="ach-desc">' + a.desc + "</span>";
+    wrap.appendChild(d);
+    achEls[a.id] = d;
+  }
+}
+
+function renderAchievements() {
+  let count = 0;
+  for (const a of ACHIEVEMENTS) {
+    const got = !!state.achievements[a.id];
+    if (got) count++;
+    achEls[a.id].classList.toggle("unlocked", got);
+    achEls[a.id].classList.toggle("locked", !got);
+  }
+  $("ach-count").textContent = count + " / " + ACHIEVEMENTS.length;
 }
 
 function render() {
@@ -655,6 +736,7 @@ function render() {
   }
   $("upgrades-panel").hidden = !anyUpgrade;
 
+  renderAchievements();
   renderLog();
 }
 
@@ -689,6 +771,7 @@ function load() {
     );
     state.upgrades = saved.upgrades || {};
     state.meta = saved.meta || {};
+    state.achievements = saved.achievements || {};
     state.settings = Object.assign(
       { crt: true, notation: "standard" },
       saved.settings || {}
@@ -886,6 +969,7 @@ function wireUp() {
 
 // --- start ------------------------------------------------------------------
 buildUpgrades();
+buildAchievements();
 load();
 applySettings();
 wireUp();
