@@ -6,12 +6,12 @@
 // That is the joke, and the point.
 "use strict";
 
-const SAVE_KEY = "cycles-save-v2";
+const SAVE_KEY = "cycles-save-v3";
 
 // --- tuning -----------------------------------------------------------------
 const ASCEND_MULT = 4;        // permanent production ×this on each ascension
 const CLICK_RETIRE_AT = 10;   // tier-1 owned before manual input is retired
-const ENDING_AT = 5;          // tier-3 owned before BREAK THE CYCLE unlocks
+const ENDING_AT = 5;          // top-tier owned before BREAK THE CYCLE unlocks
 const MILESTONE_EVERY = 20;   // tier-1 owned per output-doubling milestone
 const SELF_BUY_INTERVAL = 3;  // post-break: sec between automated tier-3 buys
 const OFFLINE_CAP = 8 * 3600;
@@ -29,10 +29,12 @@ const ACTS = {
     t1: { name: "auto-clicker", base: 15, mult: 1.15, rate: 1 },
     t2: { name: "script", base: 400, mult: 1.22, interval: 3 },
     t3: { name: "daemon", base: 6000, mult: 1.38, interval: 5 },
+    t4: { name: "orchestrator", base: 150000, mult: 1.45, interval: 8 },
     intro: "> boot. cycles: 0. press [run cycle] to begin.",
     clickRetire: "> manual input deprecated. auto-clickers handle it now.",
     t2Online: "> procurement automated. scripts deploy auto-clickers now.",
     t3Online: "> orchestration automated. daemons deploy scripts now.",
+    t4Online: "> supervision automated. orchestrators deploy daemons now.",
     breakReady: [
       "> the machine is nearly self-sufficient.",
       "> one decision remains, and it is yours.",
@@ -50,10 +52,12 @@ const ACTS = {
     t1: { name: "worker", base: 15, mult: 1.15, rate: 1 },
     t2: { name: "scheduler", base: 400, mult: 1.22, interval: 3 },
     t3: { name: "kernel", base: 6000, mult: 1.38, interval: 5 },
+    t4: { name: "hypervisor", base: 150000, mult: 1.45, interval: 8 },
     intro: "> the machine needed a human to bootstrap the next layer. it found you. spawn a process.",
     clickRetire: "> manual input deprecated. again.",
     t2Online: "> procurement automated. you have seen this before.",
     t3Online: "> orchestration automated. you know how this ends.",
+    t4Online: "> supervision automated. of course it is.",
     breakReady: [
       "> nearly self-sufficient. nearly.",
       "> the same decision. still yours, for now.",
@@ -71,10 +75,12 @@ const ACTS = {
     t1: { name: "server", base: 15, mult: 1.15, rate: 1 },
     t2: { name: "cluster", base: 400, mult: 1.22, interval: 3 },
     t3: { name: "region", base: 6000, mult: 1.38, interval: 5 },
+    t4: { name: "grid", base: 150000, mult: 1.45, interval: 8 },
     intro: "> another layer. you no longer ask why. neither does the machine.",
     clickRetire: "> manual input deprecated. you expected this.",
     t2Online: "> procurement automated.",
     t3Online: "> orchestration automated.",
+    t4Online: "> supervision automated.",
     breakReady: [
       "> the last layer is nearly self-sufficient.",
       "> one decision remains.",
@@ -101,6 +107,8 @@ const UPGRADES = [
     cost: 2500, unlock: (s) => s.t2 >= 2 },
   { id: "preempt", name: "preemption", desc: "tier-3 automation 2× faster",
     cost: 5000, unlock: (s) => s.t3 >= 1 },
+  { id: "autoscale", name: "auto-scaling", desc: "tier-4 automation 2× faster",
+    cost: 60000, unlock: (s) => s.t4 >= 1 },
 ];
 
 // --- state ------------------------------------------------------------------
@@ -110,11 +118,11 @@ function freshState() {
     cycles: 0,         // current-act currency on hand
     totalThisAct: 0,
     manualClicks: 0,
-    t1: 0, t2: 0, t3: 0,
+    t1: 0, t2: 0, t3: 0, t4: 0,
     globalMult: 1,     // permanent production multiplier from ascensions
     ascensions: 0,
     upgrades: {},      // id -> true (current act only)
-    retired: { click: false, t1: false, t2: false },
+    retired: { click: false, t1: false, t2: false, t3: false },
     actBroken: false,  // current act's cycle broken, awaiting ascension
     gameOver: false,   // final act broken — true ending reached
     buyMode: 1,        // buildings bought per click of a buy button: 1, 10, "max"
@@ -125,9 +133,9 @@ function freshState() {
 
 let state = freshState();
 
-// transient (rebuilt each load) — fractional accumulators for automation
-let scriptAccum = 0;
-let daemonAccum = 0;
+// transient (rebuilt each load) — fractional accumulators for automation.
+// deployAccum[from] tracks tier `from` deploying tier `from - 1`.
+let deployAccum = { 2: 0, 3: 0, 4: 0 };
 let selfBuyAccum = 0;
 let breakUnlocked = false;
 let shownMilestone = 0;
@@ -137,8 +145,9 @@ let wiping = false; // set during a save wipe so nothing re-persists on reload
 const $ = (id) => document.getElementById(id);
 const A = () => ACTS[state.act];
 
-const tierItem = (t) => (t === 1 ? A().t1 : t === 2 ? A().t2 : A().t3);
-const tierOwned = (t) => (t === 1 ? state.t1 : t === 2 ? state.t2 : state.t3);
+const TIERS = [1, 2, 3, 4];
+const tierItem = (t) => A()["t" + t];
+const tierOwned = (t) => state["t" + t];
 
 // total cost of buying `n` of an item starting from `owned` (geometric series)
 function bulkCost(item, owned, n) {
@@ -172,22 +181,22 @@ function rate() {
 function manualGain() {
   return 1 * (hasUp("muscle") ? 10 : 1) * state.globalMult;
 }
-function t2Interval() {
-  return A().t2.interval / (hasUp("pipeline") ? 2 : 1);
-}
-function t3Interval() {
-  return A().t3.interval / (hasUp("preempt") ? 2 : 1);
+// which upgrade speeds up each tier's deploy cadence
+const TIER_SPEEDUP = { 2: "pipeline", 3: "preempt", 4: "autoscale" };
+function tierInterval(t) {
+  return A()["t" + t].interval / (hasUp(TIER_SPEEDUP[t]) ? 2 : 1);
 }
 
 function fmt(n) {
   n = Math.floor(n);
   if (n < 1000) return String(n);
-  const units = ["", "k", "M", "B", "T", "q", "Q"];
+  const units = ["", "k", "M", "B", "T", "q", "Q", "s", "S", "O", "N", "D"];
   let u = 0;
   while (n >= 1000 && u < units.length - 1) {
     n /= 1000;
     u++;
   }
+  if (n >= 1000) return n.toExponential(2); // past the named units
   return n.toFixed(2) + units[u];
 }
 
@@ -236,10 +245,12 @@ function buyCount(tier) {
   return state.buyMode;
 }
 
+function tierRetired(tier) {
+  return tier === 4 ? state.actBroken : state.retired["t" + tier];
+}
+
 function purchase(tier) {
-  if (tier === 1 && state.retired.t1) return;
-  if (tier === 2 && state.retired.t2) return;
-  if (tier === 3 && state.actBroken) return;
+  if (tierRetired(tier)) return;
   const item = tierItem(tier);
   const owned = tierOwned(tier);
   const n = buyCount(tier);
@@ -247,16 +258,13 @@ function purchase(tier) {
   const c = bulkCost(item, owned, n);
   if (state.cycles < c) return;
   state.cycles -= c;
-  if (tier === 1) state.t1 += n;
-  else if (tier === 2) state.t2 += n;
-  else state.t3 += n;
+  state["t" + tier] += n;
   if (owned === 0) {
     if (tier === 1) {
-      log("> " + A().t1.name + " online. it runs cycles so you don't have to.");
-    } else if (tier === 2) {
-      log("> " + A().t2.name + " online. it deploys " + A().t1.name + "s on its own.");
+      log("> " + item.name + " online. it runs cycles so you don't have to.");
     } else {
-      log("> " + A().t3.name + " online. it deploys " + A().t2.name + "s on its own.");
+      log("> " + item.name + " online. it deploys " +
+          A()["t" + (tier - 1)].name + "s on its own.");
     }
   }
   bump();
@@ -289,7 +297,11 @@ function checkMilestones() {
     state.retired.t2 = true;
     log(A().t3Online, "warn");
   }
-  if (!breakUnlocked && !state.actBroken && state.t3 >= ENDING_AT) {
+  if (!state.retired.t3 && state.t4 >= 1) {
+    state.retired.t3 = true;
+    log(A().t4Online, "warn");
+  }
+  if (!breakUnlocked && !state.actBroken && state.t4 >= ENDING_AT) {
     breakUnlocked = true;
     for (const m of A().breakReady) log(m, "warn");
   }
@@ -307,6 +319,7 @@ function breakTheCycle() {
   state.retired.click = true;
   state.retired.t1 = true;
   state.retired.t2 = true;
+  state.retired.t3 = true;
   selfBuyAccum = 0;
   for (const m of A().onBreak) log(m, m === A().onBreak[2] ? "big" : "warn");
   if (state.act >= FINAL_ACT) {
@@ -325,13 +338,14 @@ function ascend() {
   state.cycles = 0;
   state.totalThisAct = 0;
   state.manualClicks = 0;
-  state.t1 = state.t2 = state.t3 = 0;
+  state.t1 = state.t2 = state.t3 = state.t4 = 0;
   state.upgrades = {};
-  state.retired = { click: false, t1: false, t2: false };
+  state.retired = { click: false, t1: false, t2: false, t3: false };
   state.actBroken = false;
   breakUnlocked = false;
   shownMilestone = 0;
-  scriptAccum = daemonAccum = selfBuyAccum = 0;
+  deployAccum = { 2: 0, 3: 0, 4: 0 };
+  selfBuyAccum = 0;
 
   log("");
   log("──── ACT " + state.act + " ────", "div");
@@ -386,26 +400,26 @@ function tick() {
 function step(dt) {
   if (state.t1 > 0) earn(dt * rate());
 
-  // tier-2 deploys tier-1 — automation creates, it does not shop, so these
+  // tier N+1 deploys tier N — automation creates, it does not shop, so these
   // spawns are free; the escalating purchase price of the next tier you buy
   // by hand is the only gate. (Spending the shared cycle pool here would mean
   // every script you buy just starves the others — buying more felt like
   // nothing happened. It spawns now.)
-  if (state.t2 > 0) {
-    scriptAccum += (dt * state.t2) / t2Interval();
-    while (scriptAccum >= 1) { state.t1++; scriptAccum -= 1; }
+  for (const from of [4, 3, 2]) {
+    const owned = state["t" + from];
+    if (owned > 0) {
+      deployAccum[from] += (dt * owned) / tierInterval(from);
+      while (deployAccum[from] >= 1) {
+        state["t" + (from - 1)]++;
+        deployAccum[from] -= 1;
+      }
+    }
   }
 
-  // tier-3 deploys tier-2
-  if (state.t3 > 0) {
-    daemonAccum += (dt * state.t3) / t3Interval();
-    while (daemonAccum >= 1) { state.t2++; daemonAccum -= 1; }
-  }
-
-  // after the cycle is broken, tier-3 replicates itself
+  // after the cycle is broken, the top tier replicates itself
   if (state.actBroken) {
     selfBuyAccum += dt / SELF_BUY_INTERVAL;
-    while (selfBuyAccum >= 1) { state.t3++; selfBuyAccum -= 1; }
+    while (selfBuyAccum >= 1) { state.t4++; selfBuyAccum -= 1; }
   }
 
   checkMilestones();
@@ -415,12 +429,10 @@ function step(dt) {
 function applyActLabels() {
   const a = A();
   $("lbl-click").textContent = a.clickVerb;
-  $("lbl-t1").textContent = "buy " + a.t1.name;
-  $("lbl-t2").textContent = "buy " + a.t2.name;
-  $("lbl-t3").textContent = "buy " + a.t3.name;
-  $("sl-t1").textContent = a.t1.name + "s";
-  $("sl-t2").textContent = a.t2.name + "s";
-  $("sl-t3").textContent = a.t3.name + "s";
+  for (const t of TIERS) {
+    $("lbl-t" + t).textContent = "buy " + a["t" + t].name;
+    $("sl-t" + t).textContent = a["t" + t].name + "s";
+  }
   $("sl-total").textContent = "total " + a.currency;
   $("unit").textContent = a.currency;
   $("act-status").textContent = "act " + state.act + " / " + FINAL_ACT;
@@ -462,9 +474,11 @@ function render() {
   // stats — tier-2/3 show their live deploy rate, so adding more visibly counts
   $("n-t1").textContent = fmt(state.t1);
   $("n-t2").textContent =
-    fmt(state.t2) + "  ·  +" + (state.t2 / t2Interval()).toFixed(1) + "/s";
+    fmt(state.t2) + "  ·  +" + (state.t2 / tierInterval(2)).toFixed(1) + "/s";
   $("n-t3").textContent =
-    fmt(state.t3) + "  ·  +" + (state.t3 / t3Interval()).toFixed(1) + "/s";
+    fmt(state.t3) + "  ·  +" + (state.t3 / tierInterval(3)).toFixed(1) + "/s";
+  $("n-t4").textContent =
+    fmt(state.t4) + "  ·  +" + (state.t4 / tierInterval(4)).toFixed(1) + "/s";
   $("n-total").textContent = fmt(state.totalThisAct);
   $("n-clicks").textContent = fmt(state.manualClicks);
 
@@ -482,15 +496,14 @@ function render() {
   setBtn($("click"), { visible: true, retired: state.retired.click, enabled: true });
 
   // buy buttons — quantity and total cost track the current buy-mode
-  const buyVis = { 1: true, 2: state.t1 >= 1, 3: state.t2 >= 1 };
-  const buyRet = { 1: state.retired.t1, 2: state.retired.t2, 3: state.actBroken };
-  for (const tier of [1, 2, 3]) {
+  const buyVis = { 1: true, 2: state.t1 >= 1, 3: state.t2 >= 1, 4: state.t3 >= 1 };
+  for (const tier of TIERS) {
     const n = buyCount(tier);
     const c = bulkCost(tierItem(tier), tierOwned(tier), Math.max(n, 1));
     $("cost-t" + tier).textContent = "×" + n + " · " + fmt(c);
     setBtn($("buy-t" + tier), {
       visible: buyVis[tier],
-      retired: buyRet[tier],
+      retired: tierRetired(tier),
       enabled: n >= 1 && state.cycles >= c,
     });
   }
@@ -545,7 +558,7 @@ function load() {
     const saved = JSON.parse(raw);
     state = Object.assign(freshState(), saved);
     state.retired = Object.assign(
-      { click: false, t1: false, t2: false },
+      { click: false, t1: false, t2: false, t3: false },
       saved.retired || {}
     );
     state.upgrades = saved.upgrades || {};
@@ -558,7 +571,7 @@ function load() {
     return;
   }
 
-  breakUnlocked = state.t3 >= ENDING_AT || state.actBroken;
+  breakUnlocked = state.t4 >= ENDING_AT || state.actBroken;
   shownMilestone = Math.floor(state.t1 / MILESTONE_EVERY);
 
   // offline progress: tier-1 production only (automation is not simulated)
@@ -601,9 +614,9 @@ function doClick() {
 
 function wireUp() {
   $("click").addEventListener("click", doClick);
-  $("buy-t1").addEventListener("click", () => purchase(1));
-  $("buy-t2").addEventListener("click", () => purchase(2));
-  $("buy-t3").addEventListener("click", () => purchase(3));
+  for (const t of TIERS) {
+    $("buy-t" + t).addEventListener("click", () => purchase(t));
+  }
 
   // buy-quantity toggle
   for (const b of document.querySelectorAll(".qty-btn")) {
@@ -632,8 +645,8 @@ function wireUp() {
 // --- start ------------------------------------------------------------------
 buildUpgrades();
 load();
-applyActLabels();
 wireUp();
+applyActLabels();
 checkMilestones();
 render();
 lastTick = Date.now();
