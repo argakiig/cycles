@@ -648,9 +648,10 @@ function step(dt) {
     if (from === 2 && hasWorker("kiddie")) burst = 2;
     if (from === 8 && hasWorker("architect")) burst = 3;
     deployAccum[from] += (dt * owned) / tierInterval(from);
-    while (deployAccum[from] >= 1) {
-      state["t" + (from - 1)] += burst;
-      deployAccum[from] -= 1;
+    const inc = Math.floor(deployAccum[from]);
+    if (inc > 0) {
+      state["t" + (from - 1)] += inc * burst;
+      deployAccum[from] -= inc;
     }
   }
 
@@ -658,23 +659,27 @@ function step(dt) {
   // tier-6 also feed tier-4, devops keeps buying tier-7 for free
   if (hasWorker("neckbeard")) {
     workerAccum.neckbeard += dt / 2.5;
-    while (workerAccum.neckbeard >= 1) { state.t4++; workerAccum.neckbeard -= 1; }
+    const inc = Math.floor(workerAccum.neckbeard);
+    if (inc > 0) { state.t4 += inc; workerAccum.neckbeard -= inc; }
   }
   if (hasWorker("hacker") && state.t6 > 0) {
     workerAccum.hacker += (dt * state.t6) / tierInterval(6);
-    while (workerAccum.hacker >= 1) { state.t4++; workerAccum.hacker -= 1; }
+    const inc = Math.floor(workerAccum.hacker);
+    if (inc > 0) { state.t4 += inc; workerAccum.hacker -= inc; }
   }
   if (hasWorker("devops")) {
     workerAccum.devops += dt / 4;
-    while (workerAccum.devops >= 1) { state.t7++; workerAccum.devops -= 1; }
+    const inc = Math.floor(workerAccum.devops);
+    if (inc > 0) { state.t7 += inc; workerAccum.devops -= inc; }
   }
 
   // after the cycle is broken, the top tier replicates itself
   if (state.actBroken) {
     selfBuyAccum += dt / SELF_BUY_INTERVAL;
-    while (selfBuyAccum >= 1) {
-      state["t" + TIER_COUNT]++;
-      selfBuyAccum -= 1;
+    const inc = Math.floor(selfBuyAccum);
+    if (inc > 0) {
+      state["t" + TIER_COUNT] += inc;
+      selfBuyAccum -= inc;
     }
   }
 
